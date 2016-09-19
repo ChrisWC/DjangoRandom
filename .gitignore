@@ -90,3 +90,5 @@ ENV/
 
 # PROJECT DIR
 random_data/media/
+random_data_app/migrations/
+db.sqlite3

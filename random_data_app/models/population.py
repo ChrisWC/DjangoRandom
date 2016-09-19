@@ -49,7 +49,6 @@ class BooleanSample:
         if self.gen == None and spec==None:
             return bool(random.getrandbits(1))
         elif self.gen == None and spec != None and len(choices) > 0:
-            print "GENNNNNNN"
             true_choice = choices.filter(value="TRUE")
             false_choice = choices.filter(value="FALSE")
             resultingDistribution = [0.0, 0.0]
@@ -95,14 +94,14 @@ default_samples = {
 
 class Population(models.Model):
     name = models.CharField(max_length=160, null=True, blank=True)
-    model = models.ForeignKey(ContentType, on_delete=models.CASCADE)
-    size = models.PositiveIntegerField()
+    #model = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    #size = models.PositiveIntegerField()
 
     def save(self, *args, **kwargs):
         s = super(Population, self).save(*args, **kwargs)
         #Generate Field Specifications
 
-        PopulationGenerator(population=self).generate()
+        #PopulationGenerator(population=self).generate()
         return s
 
 class PopulationMember(models.Model):
@@ -112,7 +111,6 @@ class PopulationMember(models.Model):
     content_object = GenericForeignKey('content_type', 'object_id')
 
     def save(self, *args, **kwargs):
-        print self
         s = super(PopulationMember, self).save(*args, **kwargs)
 
         return s
@@ -120,37 +118,24 @@ class PopulationMember(models.Model):
     def __str__(self):
         return str(self.content_object)
 
-class ChoiceDistribution(models.Model):
-    value = models.CharField(max_length=80)
-    distribution = models.FloatField()
-    ensure_distribution = models.BooleanField(default=False)
-    random = models.BooleanField(default=True)
-    field = models.ForeignKey('FieldSpec')
-
-class FieldSpec(models.Model):
-    field_type = models.CharField(max_length=80)
-    field_name = models.CharField(max_length=80)
-    random = models.BooleanField(default=True)
-    choices = models.ManyToManyField(ChoiceDistribution, blank=True, null=True)
-    population = models.ForeignKey(Population)
 
 class Sample(models.Model):
     population = models.ForeignKey(Population)
+    model = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     member = models.ManyToManyField(PopulationMember, blank=True)
+    specs = models.ManyToManyField('FieldSpec', blank=True)
     size = models.PositiveIntegerField()
 
     def save(self, *args, **kwargs):
         s = super(Sample, self).save(*args, **kwargs)
-        if (self.member == None or len(self.member.all()) == 0):
+        SampleGenerator(self).generate()
+        #if (self.member == None or len(self.member.all()) == 0):
             #generate
-            m = PopulationMember.objects.filter(population=self.population)
-            r = random.sample(range(self.population.size), self.size)
-            mlist = []
-            print s
-            for i in r:
-                self.member.add(m[i])
-            self.save()
-
+            #m = PopulationMember.objects.filter(population=self.population)
+            #r = random.sample(range(self.size), self.size)
+            #for i in r:
+                #self.member.add(m[i])
+            #self.save()
         return s
 
 @receiver(m2m_changed, sender=Sample.member.through)
@@ -166,19 +151,34 @@ def update_members(*args, **kwargs):
                 obj.member.add(mp)
 
 
-class PopulationGenerator:
-    def __init__(self, population):
-        self.population = population
-        self.model_class = self.population.model.model_class()
+class ChoiceDistribution(models.Model):
+    value = models.CharField(max_length=80)
+    distribution = models.FloatField()
+    ensure_distribution = models.BooleanField(default=False)
+    random = models.BooleanField(default=True)
+    field = models.ForeignKey('FieldSpec')
 
-        self.population_size = self.population.size
+class FieldSpec(models.Model):
+    field_type = models.CharField(max_length=80)
+    field_name = models.CharField(max_length=80)
+    random = models.BooleanField(default=True)
+    choices = models.ManyToManyField(ChoiceDistribution, blank=True, null=True)
+
+    def __str__(self):
+        return self.field_name
+class SampleGenerator:
+    def __init__(self, sample):
+        self.sample = sample
+        self.model_class = self.sample.model.model_class()
+
+        self.sample_size = self.sample.size
         self.samples = {} #for generating population
         self.fields = {}
 
     def kwarg_value(self, fieldname, fieldtype, field):
-        field_specs = FieldSpec.objects.filter(population=self.population, field_type=fieldtype, field_name=fieldname)
+        field_specs = FieldSpec.objects.filter(field_type=fieldtype, field_name=fieldname)
         if len(field_specs) == 0:
-            field_specs = FieldSpec(population=self.population,field_type=fieldtype, field_name=fieldname, random=True)
+            field_specs = FieldSpec(field_type=fieldtype, field_name=fieldname, random=True)
             field_specs.save()
 
         if (hasattr(self.samples, fieldname)):
@@ -187,7 +187,7 @@ class PopulationGenerator:
             if self.fields.get(fieldname, None) == None:
                 self.fields[fieldname] = default_samples[fieldtype]()
 
-            return self.fields[fieldname].sample(self.population.size, field, field_specs)
+            return self.fields[fieldname].sample(self.sample.size, field, field_specs)
 
     def generate_kwargs(self):
         kwargs = {}
@@ -197,33 +197,34 @@ class PopulationGenerator:
 
         return kwargs
     def clear_members(self):
-        for m in PopulationMember.objects.filter(population=self.population):
+        for m in PopulationMember.objects.filter(population=self.sample.population, content_type=self.sample.model):
             m.content_object.delete()
             m.delete()
 
 
     def generate(self):
         self.clear_members()
-        for p in range(self.population.size):
+        for p in range(self.sample.size):
             ct = self.model_class
             #m = self.population.model.model_class()
             kwargs =  self.generate_kwargs()
             i = ct(**kwargs)
             i.save()
 
-            pm = PopulationMember(population=self.population, content_object=i)
+            pm = PopulationMember(population=self.sample.population, content_object=i)
             pm.save()
             #self.population.append(i)
 
 
-        npm = PopulationMember.objects.filter(population=self.population)
+        npm = PopulationMember.objects.filter(population=self.sample.population, content_type=self.sample.model)
         return npm
+    """
     def sample_random(self):
         return
 
     def sample_unique(self, unique_count):
         r = random.sample(range(self.population.size), unique_count)
-        s = PopulationMember.objects.filter(population=self.population)
+        s = PopulationMember.objects.filter(population=self.population, content_type=self.sample.model)
         sample = Sample(population=self.population, size=unique_count)
         sample.save()
         for i in r:
@@ -236,3 +237,4 @@ class PopulationGenerator:
             return self.sample_random()
         else:
             return self.sample_unique()
+    """

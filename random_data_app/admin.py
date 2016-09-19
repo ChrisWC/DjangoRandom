@@ -33,60 +33,45 @@ class ChoiceDistributionInline(admin.TabularInline):
     extra = 0
 
 class FieldSpecAdmin(admin.ModelAdmin):
-    list_display = ('model_name', 'population_name_or_id', 'field_type', 'field_name', 'random')
+    list_display = ('field_type', 'field_name', 'random')
     fields = ('field_type', 'field_name', 'random')
     inlines = [ChoiceDistributionInline]
 
-    def model_name(self, obj):
-        return str(obj.population.model)
-
-    def population_name_or_id(self, obj):
-        nm = obj.population.name
-        if nm != None and len(nm) > 0:
-            return str(nm)
-        return str(obj.population.id)
 
 class FieldSpecInline(admin.TabularInline):
     model = FieldSpec
-    fields = ('field_type', 'field_name', 'random', 'choices')
     extra = 0
 
-    def formfield_for_manytomany(self, db_field, request, **kwargs):
-        """
-        print db_field
-        print request.__dict__
-        print kwargs
-        if db_field == 'choices':
-            print "FGGGGFFFFFFFFFF"
+class SampleInline(admin.StackedInline):
+    model = Sample
+    readonly_fields = ('population', 'member')
+    extra = 1
 
-        r = ChoiceDistribution.objects.filter(field=self.instance)
-        kwargs["queryset"] = r
-        """
-        return super(FieldSpecInline, self).formfield_for_manytomany(db_field, request, **kwargs)
-        #if db_field.name == 'choices':
-            #kwargs["queryset"] = ChoiceDistribution.objects.filter(field=
 class PopulationAdmin(admin.ModelAdmin):
-    list_display = ('name', 'model', 'size')
+    list_display = ('name',)
     fieldsets = (
             (None, {
-                'fields':('name', 'model', 'size',)
+                'fields':('name',)
             }),
         )
-    inlines = [FieldSpecInline]
+    inlines = [SampleInline]
 
     def get_model_fields(self, obj):
         print obj
         return ""
+
 class PopulationMemberInline(admin.TabularInline):
     model = PopulationMember
     fields = ('population', 'content_object')
 
 class SampleAdmin(admin.ModelAdmin):
     list_display = ('population', 'size', 'member_count')
-    #inlines = [PopulationMemberInline]
+    fields = ('population', 'member', 'size', 'model', 'specs')
+    readonly_fields = ('member',)
 
     def member_count(self, obj):
-        return str(len(obj.member.all()))
+        m = PopulationMember.objects.filter(population=obj.population, content_type=obj.model)
+        return str(len(m))
 
 admin.site.register(Name, NameAdmin)
 admin.site.register(Population, PopulationAdmin)
