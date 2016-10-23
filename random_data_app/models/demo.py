@@ -18,6 +18,7 @@ class Name(models.Model):
     added = models.DateField()
     used = models.DateTimeField()
     avatar = models.ImageField(upload_to="avatar/", null=True, blank=True)
+    rel = models.ForeignKey('Name', null=True, blank=True, related_name="relation")
     #population = GenericRelation('Population', related_query_name="name")
 
     def avatar_tag(self):

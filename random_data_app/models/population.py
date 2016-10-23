@@ -14,6 +14,71 @@ from django.utils import timezone
 #from random_data_app.generators import population
 from django.db.models.signals import m2m_changed
 from django.dispatch import receiver
+import re
+import ast
+class ForeignKeySample:
+    gen = None
+    def genDist(self, size, field, spec):
+        p0 = '(?P<model>\w+)\((?P<args>\w+([=]\w+){0,1}([,]\s*\w+[=](\w+){0,1})*)\)'
+        p1 = '(?P<key>[a-zA-Z0-9_]+)[=](?P<value>\w+)'
+        choices = ChoiceDistribution.objects.filter(field=spec)
+
+        if len(choices) == 0:
+            yield None
+
+        default_values = {
+
+        }
+        for choice in choices:
+            r0 = re.search(p0, choice.value)
+            if r0 != None:
+                model_name = r0.group('model')
+                arguments = r0.group('args')
+
+                arg_list = arguments.split(',')
+                filters = dict()
+                for arg in arg_list:
+                    kv = re.search(p1, arg)
+                    if kv:
+                        if kv.group('value').startswith("'") and kv.group('value').endswith("'"):
+                            filters[kv.group('key')] = kv.group('value')[1:-1]
+                        elif kv.group('value').lower() == 'true':
+                            filters[kv.group('key')] = True
+                        elif kv.group('value').lower() == 'false':
+                            filters[kv.group('key')] = False
+                        elif re.match("[-+]?\d+$",kv.group('value')) != None:
+                            filters[kv.group('key')] = int(kv.group('value'))
+                        elif re.match("[-+]?\d+[.]\d+$",kv.group('value')) != None:
+                            filters[kv.group('key')] = float(kv.group('value'))
+
+
+                if arg_list:
+                    print len(arg_list)
+
+                #toField = re.search('\w+', choice.value).group(0)
+                dist = choice.distribution
+                to_l = ContentType.objects.filter(model=model_name.lower())
+
+                if len(to_l) > 0:
+                    mclass = to_l[0].model_class()
+
+                    o = mclass.objects.filter(**filters)
+                    mx = len(o)
+                    print o
+                    if mx > 0:
+                        for i in range(0, int(size*dist)):
+                            yield o[random.randint(0, mx-1)]
+
+    def sample(self, size, field, spec=None):
+        #create a foreign key with with current model and specified model
+        #the basic spec is 'modelname'
+        self.gen = self.genDist(size, field, spec)
+        try:
+            return next(self.gen)
+        except:
+            self.gen = None
+
+        return None
 
 class CharFieldSample:
     def sample(self, size, field, spec):
@@ -89,7 +154,8 @@ default_samples = {
         "DateField":DateSample,
         "DateTimeField":DateTimeSample,
         "ImageField":ImageSample,
-        "FileField":ImageSample
+        "FileField":ImageSample,
+        "ForeignKey":ForeignKeySample
 }
 
 class Population(models.Model):
@@ -128,7 +194,9 @@ class Sample(models.Model):
 
     def save(self, *args, **kwargs):
         s = super(Sample, self).save(*args, **kwargs)
-        SampleGenerator(self).generate()
+        sg = SampleGenerator(self)
+        sg.generate()
+        sg.reflow()
         #if (self.member == None or len(self.member.all()) == 0):
             #generate
             #m = PopulationMember.objects.filter(population=self.population)
@@ -166,6 +234,7 @@ class FieldSpec(models.Model):
 
     def __str__(self):
         return self.field_name
+
 class SampleGenerator:
     def __init__(self, sample):
         self.sample = sample
@@ -196,9 +265,17 @@ class SampleGenerator:
                 kwargs[f.name] = self.kwarg_value(f.name, f.get_internal_type(), f)
 
         return kwargs
+    def generate_relation_kwargs(self):
+        kwargs = {}
+        for f in self.model_class._meta.get_fields():
+            if not f.auto_created and f.get_internal_type() in ['ForeignKey']:
+                kwargs[f.name] = self.kwarg_value(f.name, f.get_internal_type(), f)
+
+        return kwargs
     def clear_members(self):
         for m in PopulationMember.objects.filter(population=self.sample.population, content_type=self.sample.model):
-            m.content_object.delete()
+            if m.content_object != None:
+                m.content_object.delete()
             m.delete()
 
 
@@ -215,26 +292,17 @@ class SampleGenerator:
             pm.save()
             #self.population.append(i)
 
-
         npm = PopulationMember.objects.filter(population=self.sample.population, content_type=self.sample.model)
         return npm
-    """
-    def sample_random(self):
-        return
 
-    def sample_unique(self, unique_count):
-        r = random.sample(range(self.population.size), unique_count)
-        s = PopulationMember.objects.filter(population=self.population, content_type=self.sample.model)
-        sample = Sample(population=self.population, size=unique_count)
-        sample.save()
-        for i in r:
-            sample.member.add(s[i])
-            sample.save()
-            yield s[i].content_object
+    def reflow(self):
+        #reflow relations for all members
+        #get member objects
+        pml = PopulationMember.objects.filter(population=self.sample.population, content_type=self.sample.model)
+        for pm in pml:
+            nk = self.generate_relation_kwargs()
+            for key, value in nk.iteritems():
+                pm.content_object.__dict__[key + "_id"] = value
+                pm.content_object.save()
+        return PopulationMember.objects.filter(population=self.sample.population, content_type=self.sample.model)
 
-    def sample(self, unique_count=0):
-        if (unique_count==0):
-            return self.sample_random()
-        else:
-            return self.sample_unique()
-    """

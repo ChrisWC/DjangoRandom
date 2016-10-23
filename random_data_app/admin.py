@@ -7,7 +7,7 @@ import random
 # Register your models here
 class NameAdmin(admin.ModelAdmin):
     list_display = ('name', 'is_public', 'added', 'used', 'population')
-    fields = ('name', 'is_public', 'added', 'used', 'avatar', 'avatar_tag', 'population')
+    fields = ('name', 'is_public', 'added', 'used', 'avatar', 'avatar_tag', 'population', 'rel')
     readonly_fields = ('avatar_tag', 'population')
 
     def population(self, obj):
